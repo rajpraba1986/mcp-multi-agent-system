@@ -1,0 +1,119 @@
+# Database Configuration for MCP Toolbox Demo
+
+# Environment variables for different deployment scenarios
+development:
+  postgres:
+    host: localhost
+    port: 5432
+    database: mcp_demo_dev
+    user: demo_user
+    password: demo_password
+    schema: public
+    
+  sqlite:
+    database: ./data/demo_dev.db
+    
+production:
+  postgres:
+    host: ${DB_HOST}
+    port: ${DB_PORT:-5432}
+    database: ${DB_NAME}
+    user: ${DB_USER}
+    password: ${DB_PASSWORD}
+    schema: ${DB_SCHEMA:-public}
+    ssl_mode: require
+    
+# Sample database schema for the demo
+schema_setup:
+  tables:
+    users:
+      columns:
+        - id: SERIAL PRIMARY KEY
+        - full_name: VARCHAR(255) NOT NULL
+        - email: VARCHAR(255) UNIQUE NOT NULL
+        - created_at: TIMESTAMP DEFAULT NOW()
+        - last_login: TIMESTAMP
+        - status: VARCHAR(50) DEFAULT 'active'
+        
+    customers:
+      columns:
+        - id: SERIAL PRIMARY KEY
+        - email: VARCHAR(255) UNIQUE NOT NULL
+        - first_name: VARCHAR(255)
+        - last_name: VARCHAR(255)
+        - created_at: TIMESTAMP DEFAULT NOW()
+        - updated_at: TIMESTAMP DEFAULT NOW()
+        
+    products:
+      columns:
+        - id: SERIAL PRIMARY KEY
+        - name: VARCHAR(255) NOT NULL
+        - category: VARCHAR(100) NOT NULL
+        - current_stock: INTEGER DEFAULT 0
+        - min_stock_level: INTEGER DEFAULT 5
+        - unit_price: DECIMAL(10,2) NOT NULL
+        - status: VARCHAR(50) DEFAULT 'active'
+        - last_restocked: TIMESTAMP DEFAULT NOW()
+        
+    orders:
+      columns:
+        - id: SERIAL PRIMARY KEY
+        - customer_id: INTEGER REFERENCES customers(id)
+        - order_date: TIMESTAMP DEFAULT NOW()
+        - total_amount: DECIMAL(10,2) NOT NULL
+        - status: VARCHAR(50) DEFAULT 'pending'
+        
+    order_items:
+      columns:
+        - id: SERIAL PRIMARY KEY
+        - order_id: INTEGER REFERENCES orders(id)
+        - product_id: INTEGER REFERENCES products(id)
+        - quantity: INTEGER NOT NULL
+        - unit_price: DECIMAL(10,2) NOT NULL
+        
+    user_activities:
+      columns:
+        - id: SERIAL PRIMARY KEY
+        - user_id: INTEGER REFERENCES users(id)
+        - action_type: VARCHAR(100) NOT NULL
+        - action_details: TEXT
+        - timestamp: TIMESTAMP DEFAULT NOW()
+        - ip_address: INET
+
+# Sample data for testing
+sample_data:
+  users:
+    - full_name: "John Doe"
+      email: "john.doe@example.com"
+      status: "active"
+    - full_name: "Jane Smith"
+      email: "jane.smith@example.com"
+      status: "active"
+    - full_name: "Bob Johnson"
+      email: "bob.johnson@example.com"
+      status: "inactive"
+      
+  customers:
+    - email: "customer1@example.com"
+      first_name: "Alice"
+      last_name: "Wilson"
+    - email: "customer2@example.com"
+      first_name: "Charlie"
+      last_name: "Brown"
+      
+  products:
+    - name: "Laptop Computer"
+      category: "Electronics"
+      current_stock: 15
+      min_stock_level: 5
+      unit_price: 999.99
+    - name: "Office Chair"
+      category: "Furniture"
+      current_stock: 3
+      min_stock_level: 10
+      unit_price: 299.99
+    - name: "Coffee Mug"
+      category: "Office Supplies"
+      current_stock: 50
+      min_stock_level: 20
+      unit_price: 12.99
