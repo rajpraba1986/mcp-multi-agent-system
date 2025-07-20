@@ -1,0 +1,45 @@
+database_settings:
+  cleanup_old_data_days: 30
+  store_raw_data: true
+  store_structured_data: true
+email_settings:
+  batch_notifications: true
+  recipient: rajpraba_1986@yahoo.com.sg
+  send_individual_notifications: false
+  send_summary: true
+urls_to_scrape:
+- active: true
+  extraction_type: general
+  max_pages: 2
+  name: Rajpraba GitHub Profile
+  schedule: daily
+  url: https://github.com/rajpraba1986
+  description: "Extract GitHub repositories, profile info, and project details"
+- active: true
+  extraction_type: general
+  max_pages: 1
+  name: VFC Stock Quote
+  schedule: hourly
+  url: https://finance.yahoo.com/quote/VFC/
+  description: "Extract VF Corporation stock price, trends, and financial data"
+- active: true
+  extraction_type: general
+  max_pages: 1
+  name: VFC Key Statistics
+  schedule: daily
+  url: https://finance.yahoo.com/quote/VFC/key-statistics/
+  description: "Extract VFC detailed financial metrics and ratios"
+- active: true
+  extraction_type: general
+  max_pages: 1
+  name: VFC Competitors
+  schedule: daily
+  url: https://finance.yahoo.com/quote/VFC/competitors/
+  description: "Extract VFC competitor analysis and comparison data"
+- active: true
+  extraction_type: news
+  max_pages: 1
+  name: Hacker News Tech Stories
+  schedule: daily
+  url: https://news.ycombinator.com
+  description: "Extract latest tech news and discussions"

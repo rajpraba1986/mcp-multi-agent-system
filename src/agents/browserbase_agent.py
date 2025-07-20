@@ -24,9 +24,14 @@ from ..utils.logging import setup_logging
 
 # Import Database agent for A2A communication
 try:
-    from .database_agent import DatabaseAgent
+    # Try to import active PostgreSQL agent first
+    from .postgresql_database_agent import PostgreSQLDatabaseAgent as DatabaseAgent
 except ImportError:
-    DatabaseAgent = None
+    try:
+        # Fallback to legacy agent if needed
+        from .legacy_database_agent import DatabaseAgent
+    except ImportError:
+        DatabaseAgent = None
 
 
 logger = logging.getLogger(__name__)
@@ -141,8 +146,8 @@ class BrowserbaseAgent:
                 self.tools = await self._load_browserbase_tools()
                 logger.info(f"Loaded {len(self.tools)} Browserbase tools")
             else:
-                logger.warning("No MCP client provided - using mock tools")
-                self.tools = self._get_mock_tools()
+                logger.error("No MCP client provided - Browserbase agent requires MCP client")
+                raise Exception("Browserbase agent requires MCP client for real data extraction")
             
             # Create initial browser session
             await self._create_browser_session()

@@ -16,7 +16,7 @@ import json
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from client.mcp_client import MCPToolboxClient
-from agents.database_agent import DatabaseAgent
+from agents.legacy_database_agent import DatabaseAgent
 from agents.workflow import InteractiveWorkflow
 from utils.logging import setup_logging
 from utils.config import ConfigManager

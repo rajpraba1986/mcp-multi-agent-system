@@ -347,8 +347,15 @@ class MCPHub:
             }
             
             try:
+                # Smart endpoint handling - if endpoint already contains /mcp, use as-is
+                # otherwise append /mcp for backwards compatibility
+                if "/mcp" in target_agent.endpoint_url:
+                    endpoint = target_agent.endpoint_url
+                else:
+                    endpoint = f"{target_agent.endpoint_url}/mcp"
+                    
                 async with session.post(
-                    f"{target_agent.endpoint_url}/mcp",
+                    endpoint,
                     json=mcp_request,
                     headers={"Content-Type": "application/json"}
                 ) as response:

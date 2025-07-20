@@ -10,9 +10,13 @@ __author__ = "Your Name"
 __email__ = "your.email@example.com"
 
 from .client.mcp_client import MCPToolboxClient
-from .agents.database_agent import DatabaseAgent
+# Import active PostgreSQL agent
+from .agents.postgresql_database_agent import PostgreSQLDatabaseAgent
+# Legacy import (deprecated)
+from .agents.legacy_database_agent import DatabaseAgent
 
 __all__ = [
     "MCPToolboxClient",
-    "DatabaseAgent",
+    "PostgreSQLDatabaseAgent",  # Active agent
+    "DatabaseAgent",  # Legacy agent (deprecated)
 ]

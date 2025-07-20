@@ -1,0 +1,85 @@
+# Enhanced Extraction Targets Configuration
+# Real CSS selectors and configuration for Browserbase extraction
+
+extraction_targets:
+  yahoo_finance_semiconductors:
+    name: "Yahoo Finance Semiconductors"
+    url: "https://finance.yahoo.com/screener/predefined/sec-semiconductors"
+    description: "Real semiconductor stock data from Yahoo Finance"
+    browserbase_selectors:
+      stock_rows: "tbody tr"
+      symbol: "td[aria-label='Symbol'] a"
+      name: "td[aria-label='Name']"
+      price: "td[aria-label='Price (Intraday)']"
+      change: "td[aria-label='Change']" 
+      percent_change: "td[aria-label='% Change']"
+      volume: "td[aria-label='Volume']"
+      market_cap: "td[aria-label='Market Cap']"
+    wait_for: "tbody tr"
+    scroll_to_load: true
+
+  coinmarketcap_top_cryptos:
+    name: "CoinMarketCap Top Cryptocurrencies"
+    url: "https://coinmarketcap.com/"
+    description: "Real cryptocurrency data from CoinMarketCap"
+    browserbase_selectors:
+      crypto_rows: "tbody tr"
+      rank: ".cmc-table__cell--sort-by__rank"
+      name: ".cmc-table__column-name--name"
+      symbol: ".cmc-table__column-name--symbol"
+      price: ".cmc-table__cell--sort-by__price"
+      change_24h: ".cmc-table__cell--sort-by__percent-change-24-h"
+      market_cap: ".cmc-table__cell--sort-by__market-cap"
+      volume: ".cmc-table__cell--sort-by__volume-24-h"
+    wait_for: "tbody tr"
+    scroll_to_load: true
+
+  hacker_news_top:
+    name: "Hacker News Top Stories"
+    url: "https://news.ycombinator.com/"
+    description: "Real tech news from Hacker News"
+    browserbase_selectors:
+      story_rows: ".athing"
+      title: ".titleline > a"
+      url: ".titleline > a"
+      points: ".score"
+      comments: "a:contains('comments')"
+    wait_for: ".athing"
+
+  github_trending:
+    name: "GitHub Trending Repositories"
+    url: "https://github.com/trending"
+    description: "Trending GitHub repositories"
+    browserbase_selectors:
+      repo_rows: ".Box-row"
+      name: "h2 a"
+      description: "p.color-fg-muted"
+      language: "[itemprop='programmingLanguage']"
+      stars: "a[href*='/stargazers']"
+      forks: "a[href*='/forks']"
+    wait_for: ".Box-row"
+
+# Extraction scheduling configuration
+scheduling:
+  yahoo_finance_semiconductors:
+    interval_minutes: 15
+    active_hours: [9, 16]  # 9 AM to 4 PM EST (market hours)
+  
+  coinmarketcap_top_cryptos:
+    interval_minutes: 5   # Crypto markets are 24/7
+    active_hours: [0, 23] # All day
+  
+  hacker_news_top:
+    interval_minutes: 30
+    active_hours: [8, 22]  # 8 AM to 10 PM
+
+# Browserbase session configuration
+browserbase:
+  default_viewport:
+    width: 1920
+    height: 1080
+  timeout_seconds: 30
+  wait_for_load_seconds: 3
+  enable_stealth_mode: true
+  enable_screenshots: true
+  max_retries: 3

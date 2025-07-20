@@ -125,119 +125,56 @@ class EmailAgent:
             
             # Create detailed email content for extraction results
             if extraction_data and len(extraction_data) > 0:
-                # Format each URL's data in separate sections
-                url_sections = []
+                # Format the data nicely for email
+                data_preview = []
+                for i, item in enumerate(extraction_data[:5], 1):  # Show first 5 items
+                    preview_item = f"Item {i}:\n"
+                    for key, value in item.items():
+                        if isinstance(value, str) and len(value) > 100:
+                            value = value[:100] + "..."
+                        preview_item += f"  • {key}: {value}\n"
+                    data_preview.append(preview_item)
                 
-                for i, item in enumerate(extraction_data, 1):
-                    url = item.get('url', 'Unknown URL')
-                    title = item.get('title', 'No Title')
-                    description = item.get('description', 'No Description')
-                    content_preview = item.get('content', '')
-                    
-                    # Limit content preview to first 200 characters
-                    if len(content_preview) > 200:
-                        content_preview = content_preview[:200] + "..."
-                    
-                    # Extract structured data info
-                    structured_data = item.get('structured_data', {})
-                    headings_count = len(structured_data.get('headings', [])) if isinstance(structured_data, dict) else 0
-                    links_count = len(structured_data.get('links', [])) if isinstance(structured_data, dict) else 0
-                    
-                    # Create individual URL section
-                    url_section = f"""
-┌─────────────────────────────────────────────────────────────────┐
-│                        EXTRACTION #{i}                          │
-└─────────────────────────────────────────────────────────────────┘
-
-🌐 Source URL:
-{url}
-
-📝 Page Title:
-{title}
-
-📄 Description:
-{description}
-
-📊 Content Preview:
-{content_preview}
-
-📈 Structure Analysis:
-• Headings Found: {headings_count}
-• Links Detected: {links_count}
-• Content Length: {len(item.get('content', ''))} characters
-• Extraction Time: {item.get('timestamp', current_time)}
-
-════════════════════════════════════════════════════════════════════
-"""
-                    url_sections.append(url_section)
+                data_summary = "\n\n".join(data_preview)
                 
-                # Combine all sections
-                data_summary = "\n".join(url_sections)
-                
-                subject = f"✅ Data Extraction Complete: {data_count} URLs Successfully Processed"
-                body = f"""Dear Valued Client,
+                subject = f"Data Extraction Complete: {extraction_source} ({data_count} records)"
+                body = f"""Data Extraction Report
 
-I'm pleased to provide you with the latest data extraction report from our {extraction_source}. Each URL has been processed and the results are presented below in separate, detailed sections.
+Extraction Summary:
+• Source: {extraction_source}
+• URL: {extraction_data[0].get('url', 'N/A') if extraction_data else 'N/A'}
+• Records: {data_count}
+• Extracted: {current_time}
+• Method: {extraction_method}
 
-📊 EXTRACTION SUMMARY
-═══════════════════════════════════════════════════════════════════
-• Extraction Source: {extraction_source}
-• Total URLs Processed: {data_count}
-• Extraction Method: {extraction_method}
-• Completion Time: {current_time}
-• Status: ✅ SUCCESS
-
-🔍 DETAILED EXTRACTION RESULTS
-═══════════════════════════════════════════════════════════════════
+Extracted Data Preview:
 {data_summary}
 
-� OVERALL STATISTICS
-═══════════════════════════════════════════════════════════════════
-• Total Successful Extractions: {data_count}
-• Average Content Length: {sum(len(item.get('content', '')) for item in extraction_data) // len(extraction_data)} characters
-• Total Data Points Captured: {sum(len(item.get('structured_data', {}).get('headings', [])) + len(item.get('structured_data', {}).get('links', [])) for item in extraction_data if isinstance(item.get('structured_data'), dict))}
+📊 Report Summary:
+This automated extraction captured {data_count} records from {extraction_source}. The data includes all relevant information as structured above.
 
-This automated extraction has successfully captured structured data from all specified URLs. Each section above represents a complete extraction with full metadata and content analysis.
-
-Best regards,
-MCP Multi-Agent System
-Generated: {current_time} UTC
+Generated by MCP Multi-Agent System
+{current_time} UTC
 """
             else:
-                subject = f"⚠️ Data Extraction Complete: {extraction_source} (0 records)"
-                body = f"""Dear Valued Client,
+                subject = f"Data Extraction Complete: {extraction_source} (0 records)"
+                body = f"""Data Extraction Report
 
-I'm writing to inform you about the completion of a data extraction attempt from {extraction_source}.
+Extraction Summary:
+• Source: {extraction_source}  
+• URL: N/A
+• Records: 0
+• Extracted: {current_time}
+• Method: {extraction_method}
 
-📊 EXTRACTION SUMMARY
-═══════════════════════════════════════════════════════════════════
-• Extraction Source: {extraction_source}
-• Total URLs Processed: 0
-• Extraction Method: {extraction_method}
-• Completion Time: {current_time}
-• Status: ⚠️ NO DATA EXTRACTED
+⚠️ No data was extracted from the specified source. Please check:
+- Source URL accessibility
+- Data structure changes
+- Network connectivity
+- Extraction configuration
 
-🔍 TROUBLESHOOTING INFORMATION
-═══════════════════════════════════════════════════════════════════
-No data was successfully extracted from the specified source. This may be due to:
-
-• Source URL accessibility issues
-• Website structure changes
-• Network connectivity problems
-• Extraction configuration errors
-• Content protection mechanisms
-
-📞 NEXT STEPS
-═══════════════════════════════════════════════════════════════════
-Please verify the following:
-1. Source URLs are accessible
-2. Network connection is stable
-3. Extraction configuration is correct
-4. Target websites are operational
-
-Best regards,
-MCP Multi-Agent System
-Generated: {current_time} UTC
+Generated by MCP Multi-Agent System
+{current_time} UTC
 """
             
             # Send the email using the existing send_notification method

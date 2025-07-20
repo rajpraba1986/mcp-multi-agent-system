@@ -1,0 +1,240 @@
+# Browserbase Agent - Extraction Targets Configuration
+# This file defines configurable targets for web data extraction
+
+extraction_targets:
+  # Yahoo Finance Semiconductors (Default target)
+  yahoo_finance_semiconductors:
+    name: "yahoo_finance_semiconductors"
+    url: "https://finance.yahoo.com/sectors/technology/semiconductors/"
+    type: "financial_data"
+    selectors:
+      stock_rows: "tr[data-testid='row']"
+      symbol: "a[data-testid='element-symbol']"
+      company_name: "a[data-testid='element-name']"
+      price: "[data-testid='element-price']"
+      change: "[data-testid='element-change']"
+      change_percent: "[data-testid='element-change-percent']"
+      market_cap: "[data-testid='element-market-cap']"
+      volume: "[data-testid='element-volume']"
+    metadata:
+      category: "semiconductors"
+      market: "yahoo_finance"
+      data_type: "stock_data"
+      update_frequency: "real_time"
+    
+  # Technology Sector Overview
+  yahoo_finance_tech_sector:
+    name: "yahoo_finance_tech_sector"
+    url: "https://finance.yahoo.com/sectors/technology/"
+    type: "financial_data"
+    selectors:
+      sector_title: "h1"
+      sector_performance: ".performance-container"
+      subsector_list: ".sector-list li"
+      top_stocks: ".stock-list tr"
+      market_summary: ".market-summary"
+    metadata:
+      category: "technology_sector"
+      market: "yahoo_finance"
+      data_type: "sector_overview"
+  
+  # Cryptocurrency Data
+  coinmarketcap_top_cryptos:
+    name: "coinmarketcap_top_cryptos"
+    url: "https://coinmarketcap.com/"
+    type: "cryptocurrency_data"
+    selectors:
+      crypto_rows: "tr[class*='table-row']"
+      rank: ".rank"
+      name: ".currency-name"
+      symbol: ".currency-symbol"
+      price: ".price"
+      change_24h: ".percent-change"
+      market_cap: ".market-cap"
+      volume: ".volume"
+    metadata:
+      category: "cryptocurrency"
+      market: "coinmarketcap"
+      data_type: "top_currencies"
+  
+  # News Headlines
+  hacker_news:
+    name: "hacker_news"
+    url: "https://news.ycombinator.com"
+    type: "news_content"
+    selectors:
+      headlines: ".athing .titleline a"
+      scores: ".score"
+      comments: ".subtext a[href*='item']"
+      authors: ".hnuser"
+      time: ".age"
+    metadata:
+      category: "tech_news"
+      source: "hacker_news"
+      data_type: "headlines"
+  
+  # E-commerce Product Data
+  amazon_product_search:
+    name: "amazon_product_search"
+    url: "configurable"  # Requires custom URL
+    type: "product_data"
+    selectors:
+      product_containers: "[data-component-type='s-search-result']"
+      product_title: "h2 a span"
+      price: ".a-price .a-offscreen"
+      rating: ".a-icon-alt"
+      reviews: ".a-size-base"
+      image: ".s-image"
+    metadata:
+      category: "e_commerce"
+      source: "amazon"
+      data_type: "product_search"
+  
+  # Real Estate Listings
+  zillow_listings:
+    name: "zillow_listings"
+    url: "configurable"  # Requires custom URL for specific area
+    type: "real_estate_data"
+    selectors:
+      listing_cards: ".list-card"
+      price: ".list-card-price"
+      address: ".list-card-addr"
+      details: ".list-card-details"
+      square_feet: ".list-card-details li:first-child"
+      bedrooms: ".list-card-details li:nth-child(2)"
+      bathrooms: ".list-card-details li:nth-child(3)"
+    metadata:
+      category: "real_estate"
+      source: "zillow"
+      data_type: "property_listings"
+  
+  # General Web Content
+  general_web_content:
+    name: "general_web_content"
+    url: "configurable"  # Requires custom URL
+    type: "general"
+    selectors:
+      title: "h1, .title, .heading, .page-title"
+      content: "p, .content, .article-body, .post-content"
+      links: "a[href]"
+      images: "img[src]"
+      meta_description: "meta[name='description']"
+      headings: "h1, h2, h3, h4, h5, h6"
+    metadata:
+      category: "general"
+      data_type: "web_content"
+
+# Extraction settings
+extraction_settings:
+  # Default settings for all extractions
+  take_screenshot: true
+  wait_for_load: 3000  # milliseconds
+  timeout: 30000  # milliseconds
+  retry_attempts: 3
+  
+  # Per-target overrides
+  target_overrides:
+    yahoo_finance_semiconductors:
+      wait_for_load: 5000  # Financial data may take longer to load
+      timeout: 45000
+    coinmarketcap_top_cryptos:
+      wait_for_load: 4000  # Crypto data updates frequently
+      timeout: 40000
+
+# A2A Database storage configuration
+database_storage:
+  enabled: true
+  table_name: "web_extractions"
+  store_screenshots: true
+  compress_content: true
+  max_content_size: 100000  # bytes
+  
+  # Metadata to include in database storage
+  include_metadata:
+    - "agent_id"
+    - "extraction_timestamp"
+    - "target_config"
+    - "screenshot_path"
+    - "extraction_settings"
+    - "target_metadata"
+
+# Workflow definitions
+workflows:
+  # Financial data collection workflow
+  financial_data_collection:
+    name: "Financial Data Collection"
+    description: "Collect comprehensive financial market data"
+    targets:
+      - "yahoo_finance_semiconductors"
+      - "yahoo_finance_tech_sector"
+      - "coinmarketcap_top_cryptos"
+    schedule: "daily"
+    store_results: true
+  
+  # News aggregation workflow
+  news_aggregation:
+    name: "Tech News Aggregation"
+    description: "Aggregate technology news from multiple sources"
+    targets:
+      - "hacker_news"
+    schedule: "hourly"
+    store_results: true
+    
+  # Market research workflow
+  market_research:
+    name: "Market Research Data"
+    description: "Comprehensive market research data collection"
+    targets:
+      - "yahoo_finance_tech_sector"
+      - "coinmarketcap_top_cryptos"
+    custom_urls:
+      amazon_product_search: "https://www.amazon.com/s?k=semiconductors"
+    schedule: "weekly"
+    store_results: true
+
+# Custom extraction types
+custom_extraction_types:
+  financial_data:
+    description: "Extract financial market data"
+    expected_fields:
+      - "symbol"
+      - "price"
+      - "change"
+      - "volume"
+      - "market_cap"
+  
+  cryptocurrency_data:
+    description: "Extract cryptocurrency market data"
+    expected_fields:
+      - "rank"
+      - "name"
+      - "symbol"
+      - "price"
+      - "change_24h"
+      - "market_cap"
+  
+  news_content:
+    description: "Extract news articles and headlines"
+    expected_fields:
+      - "headlines"
+      - "authors"
+      - "timestamps"
+      - "scores"
+  
+  product_data:
+    description: "Extract e-commerce product information"
+    expected_fields:
+      - "title"
+      - "price"
+      - "rating"
+      - "reviews"
+      - "availability"
+  
+  real_estate_data:
+    description: "Extract real estate listing information"
+    expected_fields:
+      - "price"
+      - "address"
+      - "square_feet"
+      - "bedrooms"
+      - "bathrooms"

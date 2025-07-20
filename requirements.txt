@@ -1,6 +1,6 @@
 # Core MCP Toolbox dependencies
 toolbox-langchain>=0.3.0
-toolbox-core>=0.8.0
+toolbox-core>=0.4.0
 
 # LangChain and LangGraph
 langchain>=0.1.0

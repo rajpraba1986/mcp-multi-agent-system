@@ -17,7 +17,7 @@ from langchain_openai import ChatOpenAI
 
 from ..client.mcp_client import MCPToolboxClient
 from ..client.langchain_tools import create_langchain_tools_sync
-from .database_agent import DatabaseAgent
+from .legacy_database_agent import DatabaseAgent
 
 
 logger = logging.getLogger(__name__)

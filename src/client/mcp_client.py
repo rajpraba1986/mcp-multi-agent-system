@@ -17,7 +17,8 @@ from enum import Enum
 import aiohttp
 import websockets
 from toolbox_core import ToolboxClient
-from toolbox_langchain import ToolboxLangChain
+# Temporarily comment out problematic import
+# from toolbox_langchain import ToolboxLangChain
 
 
 logger = logging.getLogger(__name__)
@@ -31,20 +32,25 @@ class MCPMessage:
     id: Optional[str] = None
 
 @dataclass
-class MCPRequest(MCPMessage):
+class MCPRequest:
     """MCP request message."""
+    jsonrpc: str = "2.0"
     method: str
     params: Optional[Dict[str, Any]] = None
+    id: Optional[str] = None
 
 @dataclass
-class MCPResponse(MCPMessage):
+class MCPResponse:
     """MCP response message."""
+    jsonrpc: str = "2.0"
     result: Optional[Any] = None
     error: Optional[Dict[str, Any]] = None
+    id: Optional[str] = None
 
 @dataclass
-class MCPNotification(MCPMessage):
+class MCPNotification:
     """MCP notification message (no response expected)."""
+    jsonrpc: str = "2.0"
     method: str
     params: Optional[Dict[str, Any]] = None
 
@@ -137,7 +143,7 @@ class MCPProtocolClient:
         
         # Legacy client support
         self._core_client: Optional[ToolboxClient] = None
-        self._langchain_client: Optional[ToolboxLangChain] = None
+        self._langchain_client: Optional[Any] = None
         
         # Setup default message handlers
         self._setup_message_handlers()
@@ -512,7 +518,8 @@ class MCPProtocolClient:
     async def get_langchain_client(self):
         """Get or create a LangChain ToolboxClient instance (legacy compatibility)."""
         if self._langchain_client is None:
-            self._langchain_client = ToolboxLangChain(self.server_url)
+            # Temporarily disable langchain client due to import issues
+            self._langchain_client = None
         
         try:
             yield self._langchain_client
