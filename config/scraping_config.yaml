@@ -17,29 +17,27 @@ urls_to_scrape:
   description: "Extract GitHub repositories, profile info, and project details"
 - active: true
   extraction_type: general
-  max_pages: 1
-  name: VFC Stock Quote
-  schedule: hourly
-  url: https://finance.yahoo.com/quote/VFC/
-  description: "Extract VF Corporation stock price, trends, and financial data"
-- active: true
-  extraction_type: general
-  max_pages: 1
+  max_pages: 2
   name: VFC Key Statistics
   schedule: daily
   url: https://finance.yahoo.com/quote/VFC/key-statistics/
   description: "Extract VFC detailed financial metrics and ratios"
 - active: true
   extraction_type: general
-  max_pages: 1
+  max_pages: 4
   name: VFC Competitors
   schedule: daily
-  url: https://finance.yahoo.com/quote/VFC/competitors/
+  url: https://www.marketbeat.com/stocks/NYSE/VFC/competitors/
   description: "Extract VFC competitor analysis and comparison data"
 - active: true
-  extraction_type: news
-  max_pages: 1
+  extraction_type: comprehensive
+  max_pages: 2
   name: Hacker News Tech Stories
   schedule: daily
   url: https://news.ycombinator.com
   description: "Extract latest tech news and discussions"
+
+# "extraction_type": "comprehensive"  # Primary name
+# "extraction_type": "full"          # Alias
+# "extraction_type": "complete"      # Alias  
+# "extraction_type": "all"           # Alias

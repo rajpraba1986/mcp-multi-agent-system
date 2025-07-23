@@ -52,22 +52,19 @@ class PostgreSQLDatabaseAgent:
                 'host': os.getenv('POSTGRES_HOST', 'localhost'),
                 'port': int(os.getenv('POSTGRES_PORT', 5432)),
                 'database': os.getenv('POSTGRES_DB', 'toolbox_demo'),
-                'user': os.getenv('POSTGRES_USER', 'demo_user'),
-                'password': os.getenv('POSTGRES_PASSWORD', 'demo_password')
+                'user': os.getenv('POSTGRES_USER', 'prabakaranrajendran')
             }
+            
+            # Only add password if it's set in environment
+            password = os.getenv('POSTGRES_PASSWORD')
+            if password and password.strip():
+                db_config['password'] = password
             
             print(f"🔗 Connecting to PostgreSQL: {db_config['host']}:{db_config['port']}/{db_config['database']}")
             
             # Create connection pool
-            self.db_pool = await asyncpg.create_pool(
-                host=db_config['host'],
-                port=db_config['port'],
-                database=db_config['database'],
-                user=db_config['user'],
-                password=db_config['password'],
-                min_size=2,
-                max_size=10
-            )
+            db_config.update({'min_size': 2, 'max_size': 10})
+            self.db_pool = await asyncpg.create_pool(**db_config)
             
             # Create tables for extracted data
             await self.create_extraction_tables()

@@ -141,3 +141,4 @@ data/sent_emails.log
 
 # Environment variables (uncomment if you want to ignore .env)
 # .env
+.env.production

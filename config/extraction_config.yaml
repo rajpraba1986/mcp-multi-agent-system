@@ -1,0 +1,257 @@
+# Browserbase Web Extraction Configuration
+# This file defines extraction types, settings, and domain-specific configurations
+
+# Default extraction settings
+default_extraction:
+  type: "general"
+  take_screenshot: true
+  timeout: 30000  # milliseconds
+  wait_for_content: 4000  # milliseconds
+
+# Available extraction types and their descriptions
+extraction_types:
+  # =============================================================================
+  # GENERAL EXTRACTION TYPES
+  # =============================================================================
+  
+  general:
+    description: "Basic content extraction with text, links, and minimal metadata"
+    domains: ["*"]  # Works with any domain
+    features:
+      - "Text content extraction"
+      - "Basic link extraction"
+      - "Simple metadata"
+    use_cases: 
+      - "Basic web scraping"
+      - "Content monitoring"
+      - "Simple data extraction"
+
+  comprehensive:
+    description: "Extract ALL available data from the webpage"
+    aliases: ["full", "complete", "all"]  # Alternative names for this type
+    domains: ["*"]  # Works with any domain
+    features:
+      - "Full text content (no limits)"
+      - "All links with metadata"
+      - "All images with attributes"
+      - "Complete heading structure (H1-H6)"
+      - "All forms with input details"
+      - "All tables with headers and data"
+      - "Meta tags and SEO data"
+      - "Content statistics"
+    use_cases:
+      - "Complete website analysis"
+      - "SEO auditing"
+      - "Content inventory"
+      - "Website migration"
+    wait_time: 5000  # Extra time for comprehensive extraction
+
+  # =============================================================================
+  # DOMAIN-SPECIFIC EXTRACTION TYPES
+  # =============================================================================
+
+  financial:
+    description: "Optimized for financial websites like Yahoo Finance, MarketBeat"
+    domains: 
+      - "finance.yahoo.com"
+      - "marketbeat.com" 
+      - "bloomberg.com"
+      - "cnbc.com"
+    features:
+      - "Stock prices and changes"
+      - "Financial metrics and ratios"
+      - "Market data tables"
+      - "Analyst ratings"
+      - "Financial news"
+    patterns:
+      - "Price regex: \\$?\\d+\\.\\d{2}"
+      - "Change regex: [+-]?\\d+\\.\\d{1,2}%"
+    wait_time: 6000  # Financial sites load slowly
+    
+  competitor_analysis:
+    description: "Extract competitor data and comparison tables"
+    domains: 
+      - "marketbeat.com"
+      - "finance.yahoo.com"
+    features:
+      - "Competitor lists and tables"
+      - "Comparison metrics"
+      - "Stock symbols and company names"
+      - "Financial comparisons"
+    use_cases:
+      - "Market analysis"
+      - "Investment research"
+      - "Competitive intelligence"
+
+  github:
+    description: "GitHub repositories, profiles, and development data"
+    domains: ["github.com"]
+    features:
+      - "Repository information"
+      - "Programming languages"
+      - "User statistics"
+      - "Commit activity"
+      - "Issue tracking"
+    use_cases:
+      - "Developer portfolio analysis"
+      - "Open source research"
+      - "Technology stack analysis"
+
+  news:
+    description: "News websites and article extraction"
+    domains: 
+      - "news.ycombinator.com"
+      - "reddit.com"
+      - "techcrunch.com"
+    features:
+      - "Article headlines and links"
+      - "Story rankings and scores"
+      - "Comments and discussions"
+      - "Publication metadata"
+    use_cases:
+      - "News monitoring"
+      - "Trend analysis"
+      - "Content curation"
+
+  ecommerce:
+    description: "Product pages and shopping sites"
+    domains:
+      - "amazon.com"
+      - "ebay.com" 
+      - "shopify.com"
+    features:
+      - "Product information"
+      - "Prices and discounts"
+      - "Reviews and ratings"
+      - "Availability status"
+    use_cases:
+      - "Price monitoring"
+      - "Product research"
+      - "Inventory tracking"
+
+  social_media:
+    description: "Social media platforms and profiles"
+    domains:
+      - "twitter.com"
+      - "linkedin.com"
+      - "facebook.com"
+    features:
+      - "Profile information"
+      - "Post content"
+      - "Engagement metrics"
+      - "Social connections"
+    use_cases:
+      - "Social media monitoring"
+      - "Influencer analysis"
+      - "Brand sentiment tracking"
+
+  cryptocurrency:
+    description: "Crypto exchanges and market data"
+    domains:
+      - "coinmarketcap.com"
+      - "coingecko.com"
+      - "binance.com"
+    features:
+      - "Cryptocurrency prices"
+      - "Market capitalization"
+      - "Trading volumes"
+      - "Price changes"
+    use_cases:
+      - "Crypto portfolio tracking"
+      - "Market analysis"
+      - "Trading research"
+
+# =============================================================================
+# DOMAIN-SPECIFIC CONFIGURATIONS
+# =============================================================================
+
+domain_configs:
+  "finance.yahoo.com":
+    extraction_type: "financial"
+    wait_time: 6000
+    scroll_to_load: true
+    selectors:
+      price: "[data-symbol] [data-field='regularMarketPrice']"
+      change: "[data-symbol] [data-field='regularMarketChange']"
+    
+  "marketbeat.com":
+    extraction_type: "competitor_analysis"
+    wait_time: 5000
+    scroll_to_load: false
+    
+  "github.com":
+    extraction_type: "github"
+    wait_time: 3000
+    
+  "news.ycombinator.com":
+    extraction_type: "news"
+    wait_time: 2000
+
+# =============================================================================
+# EXTRACTION BEHAVIOR SETTINGS
+# =============================================================================
+
+extraction_settings:
+  # Screenshot configuration
+  screenshots:
+    enabled: true
+    full_page: true
+    directory: "data/screenshots"
+    format: "png"
+    
+  # Content limits (set to null for no limits)
+  content_limits:
+    general:
+      max_content_length: 2000
+      max_links: 20
+      max_images: 10
+    comprehensive:
+      max_content_length: null  # No limit
+      max_links: null          # No limit  
+      max_images: null         # No limit
+    financial:
+      max_content_length: 5000
+      max_links: 50
+      max_images: 20
+      
+  # Retry and timeout settings
+  reliability:
+    max_retries: 3
+    retry_delay: 2000  # milliseconds
+    page_load_timeout: 30000
+    element_timeout: 10000
+    
+  # Browser settings
+  browser:
+    headless: true
+    user_agent: "Mozilla/5.0 (compatible; MCPBrowserbaseAgent/1.0)"
+    viewport:
+      width: 1920
+      height: 1080
+
+# =============================================================================
+# USAGE EXAMPLES AND DOCUMENTATION
+# =============================================================================
+
+# How to use extraction types:
+#
+# 1. Basic usage:
+#    extraction_type: "general"
+#
+# 2. Comprehensive extraction:
+#    extraction_type: "comprehensive"  # or "full", "complete", "all"
+#
+# 3. Domain-specific:
+#    extraction_type: "financial"      # for finance sites
+#    extraction_type: "github"         # for GitHub
+#    extraction_type: "news"           # for news sites
+#
+# 4. The system will auto-detect domain and suggest appropriate extraction type
+#
+# 5. You can override domain detection by explicitly setting extraction_type
+
+# Configuration priority (highest to lowest):
+# 1. Explicitly passed extraction_type parameter
+# 2. Domain-specific configuration
+# 3. Default extraction type from this config
+# 4. System default ("general")

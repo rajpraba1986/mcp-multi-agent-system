@@ -34,8 +34,8 @@ class MCPMessage:
 @dataclass
 class MCPRequest:
     """MCP request message."""
-    jsonrpc: str = "2.0"
     method: str
+    jsonrpc: str = "2.0"
     params: Optional[Dict[str, Any]] = None
     id: Optional[str] = None
 
@@ -50,8 +50,8 @@ class MCPResponse:
 @dataclass
 class MCPNotification:
     """MCP notification message (no response expected)."""
-    jsonrpc: str = "2.0"
     method: str
+    jsonrpc: str = "2.0"
     params: Optional[Dict[str, Any]] = None
 
 @dataclass

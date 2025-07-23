@@ -52,8 +52,8 @@ class RealEmailAgent:
         # Email configuration - check multiple providers
         self.smtp_config = self._configure_smtp()
         
-        # Default recipient
-        self.default_recipient = "rajpraba_1986@yahoo.com.sg"
+        # Default recipient configuration
+        self.default_recipient = os.getenv("EMAIL_TO") or os.getenv("EMAIL_USER") or "rajpraba_1986@yahoo.com.sg"
         
         self.setup_routes()
         
@@ -74,11 +74,11 @@ class RealEmailAgent:
         outlook_user = os.getenv("OUTLOOK_USER")
         outlook_password = os.getenv("OUTLOOK_PASSWORD")
         
-        # Check for custom SMTP configuration
-        custom_smtp_server = os.getenv("SMTP_SERVER")
-        custom_smtp_user = os.getenv("SMTP_USER")
-        custom_smtp_password = os.getenv("SMTP_PASSWORD")
-        custom_smtp_port = os.getenv("SMTP_PORT")
+        # Check for custom SMTP configuration (both formats supported)
+        custom_smtp_server = os.getenv("SMTP_SERVER") or os.getenv("EMAIL_SMTP_SERVER")
+        custom_smtp_user = os.getenv("SMTP_USER") or os.getenv("EMAIL_USER")
+        custom_smtp_password = os.getenv("SMTP_PASSWORD") or os.getenv("EMAIL_PASSWORD")
+        custom_smtp_port = os.getenv("SMTP_PORT") or os.getenv("EMAIL_SMTP_PORT")
         
         # Priority: Custom SMTP > Gmail > Outlook > Simulation
         if custom_smtp_server and custom_smtp_user and custom_smtp_password:
@@ -240,7 +240,7 @@ class RealEmailAgent:
             }
     
     async def test_smtp_connection(self) -> Dict[str, Any]:
-        """Test SMTP connection"""
+        """Test SMTP connection with timeout"""
         if not self.smtp_config['configured']:
             return {
                 "status": "not_configured",
@@ -248,10 +248,17 @@ class RealEmailAgent:
             }
         
         try:
-            # Test SMTP connection in a thread pool
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(None, self._test_smtp_sync)
+            # Test SMTP connection with timeout
+            result = await asyncio.wait_for(
+                asyncio.get_event_loop().run_in_executor(None, self._test_smtp_sync),
+                timeout=10  # 10 second timeout
+            )
             return result
+        except asyncio.TimeoutError:
+            return {
+                "status": "timeout",
+                "message": f"SMTP connection test timed out after 10 seconds"
+            }
         except Exception as e:
             return {
                 "status": "error",
@@ -259,15 +266,15 @@ class RealEmailAgent:
             }
     
     def _test_smtp_sync(self) -> Dict[str, Any]:
-        """Synchronous SMTP connection test"""
+        """Synchronous SMTP connection test with timeout"""
         try:
             print(f"🔧 Testing SMTP connection to {self.smtp_config['smtp_server']}...")
             
             if self.smtp_config['use_tls']:
-                server = smtplib.SMTP(self.smtp_config['smtp_server'], self.smtp_config['smtp_port'])
+                server = smtplib.SMTP(self.smtp_config['smtp_server'], self.smtp_config['smtp_port'], timeout=5)
                 server.starttls()
             else:
-                server = smtplib.SMTP(self.smtp_config['smtp_server'], self.smtp_config['smtp_port'])
+                server = smtplib.SMTP(self.smtp_config['smtp_server'], self.smtp_config['smtp_port'], timeout=5)
             
             server.login(self.smtp_config['email_user'], self.smtp_config['email_password'])
             server.quit()
@@ -805,20 +812,29 @@ class RealEmailAgent:
         """Start the agent server"""
         print(f"🚀 Starting Real Email Agent on port {self.agent_port}")
         
-        # Test SMTP connection on startup
+        # Test SMTP connection on startup (non-blocking)
         if self.smtp_config['configured']:
-            smtp_test_result = await self.test_smtp_connection()
-            if smtp_test_result['status'] == 'success':
-                print(f"✅ SMTP connection verified - real emails will be sent!")
-            else:
-                print(f"⚠️  SMTP connection failed - will use simulation mode")
-                print(f"   Error: {smtp_test_result.get('message')}")
+            try:
+                smtp_test_result = await self.test_smtp_connection()
+                if smtp_test_result['status'] == 'success':
+                    print(f"✅ SMTP connection verified - real emails will be sent!")
+                elif smtp_test_result['status'] == 'timeout':
+                    print(f"⚠️  SMTP connection timed out - will use simulation mode")
+                    print(f"   Message: {smtp_test_result.get('message')}")
+                else:
+                    print(f"⚠️  SMTP connection failed - will use simulation mode")
+                    print(f"   Error: {smtp_test_result.get('message')}")
+            except Exception as e:
+                print(f"⚠️  SMTP test error - will use simulation mode: {e}")
         else:
             print("ℹ️  SMTP not configured - using simulation mode")
             print("   To send real emails, configure SMTP settings in .env file")
         
-        # Register with hub
-        await self.register_with_hub()
+        # Register with hub (continue even if SMTP failed)
+        try:
+            await self.register_with_hub()
+        except Exception as e:
+            print(f"⚠️  Hub registration failed: {e}")
         
         # Start server
         config = uvicorn.Config(

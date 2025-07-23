@@ -13,11 +13,15 @@ import sys
 import os
 import time
 import json
+import uuid
+import sqlite3
 from datetime import datetime
 from pathlib import Path
 import base64
 from urllib.parse import urlparse
 import aiohttp
+import aiohttp_cors
+from aiohttp import web
 from io import BytesIO
 from PIL import Image
 from playwright.async_api import async_playwright
@@ -25,41 +29,64 @@ from playwright.async_api import async_playwright
 # Add project root to path
 project_root = Path(__file__).parent.parent
 sys.path.append(str(project_root))
+sys.path.append(str(project_root))
 
 # Load environment variables
 from dotenv import load_dotenv
+load_dotenv()
+
+# Import required modules
+from langchain_anthropic import ChatAnthropic
 load_dotenv(project_root / ".env")
 
 # Browserbase API configuration
 BROWSERBASE_API_KEY = os.getenv("BROWSERBASE_API_KEY")
 BROWSERBASE_PROJECT_ID = os.getenv("BROWSERBASE_PROJECT_ID")
+BROWSERBASE_ENABLED = os.getenv("BROWSERBASE_ENABLED", "true").lower() == "true"
 
 print(f"🔑 BROWSERBASE_API_KEY loaded: {'✅ Yes' if BROWSERBASE_API_KEY else '❌ No'}")
 print(f"🏗️  BROWSERBASE_PROJECT_ID loaded: {'✅ Yes' if BROWSERBASE_PROJECT_ID else '❌ No'}")
-
-# Import simplified versions to avoid complex dependencies
-import sys
-import os
-from pathlib import Path
-import json
-import logging
-from datetime import datetime
-import sqlite3
-import uuid
+print(f"🎛️  BROWSERBASE_ENABLED: {'✅ Yes' if BROWSERBASE_ENABLED else '❌ No (Playwright-only mode)'}")
 
 # Simple LLM mock for testing
-class MockLLM:
-    async def ainvoke(self, messages):
-        class MockResponse:
-            def __init__(self):
-                self.content = '{"action": "extract_website_data", "url": "https://example.com", "extraction_type": "general"}'
-        return MockResponse()
+
+# Simple LLM mock for testing
+# Real LLM configuration
+def create_llm():
+    """Create real Anthropic LLM instance"""
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise ValueError("ANTHROPIC_API_KEY environment variable is required")
+    
+    return ChatAnthropic(
+        model="claude-3-sonnet-20240229",
+        anthropic_api_key=api_key,
+        max_tokens=4000,
+        temperature=0.1
+    )
 
 # Simplified Browserbase Agent for testing
 class SimpleBrowserbaseAgent:
     def __init__(self, port=8001):
         self.port = port
         self.session_id = None  # Will be created per request
+        
+        # Load extraction configuration
+        try:
+            self.extraction_config = load_extraction_config()
+            logger.info(f"✅ Loaded extraction config with {len(self.extraction_config.extraction_types)} extraction types")
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to load extraction config: {e}, using defaults")
+            self.extraction_config = ExtractionConfig()
+        
+        # Initialize real LLM
+        try:
+            self.llm = create_llm()
+            logger.info("✅ Real Anthropic LLM initialized")
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize LLM: {e}")
+            # Don't raise exception, agent can work without LLM for web extraction
+            self.llm = None
         
         # Only create database for storing extraction metadata, not as primary storage
         self.db_path = Path("data/browserbase_extractions.db")
@@ -114,12 +141,23 @@ class SimpleBrowserbaseAgent:
             logger.warning("⚠️  Browserbase agent initialized in local mode (no API credentials)")
         
     async def extract_website_data(self, url, extraction_type="general", selectors=None, take_screenshot=True):
-        """Enhanced website data extraction with real data and screenshots"""
+        """Enhanced website data extraction with configurable extraction types"""
         
         logger.info(f"🌍 Starting extraction for: {url}")
         
+        # Resolve extraction type using configuration
+        resolved_extraction_type = self._resolve_extraction_type(url, extraction_type)
+        logger.info(f"� Using extraction type: '{resolved_extraction_type}' (requested: '{extraction_type}')")
+        
+        # Get extraction settings from config
+        extraction_settings = self._get_extraction_settings(resolved_extraction_type)
+        
+        # Override take_screenshot from config if not explicitly set
+        if take_screenshot is True:  # Only override if default True
+            take_screenshot = extraction_settings.get("take_screenshot", True)
+        
         # Try to extract real data first
-        real_data = await self._extract_real_data(url)
+        real_data = await self._extract_real_data(url, resolved_extraction_type, extraction_settings)
         
         if real_data and real_data.get('success'):
             logger.info(f"✅ Real data extraction successful for: {url}")
@@ -137,42 +175,109 @@ class SimpleBrowserbaseAgent:
             }
         else:
             logger.error(f"❌ Real data extraction failed for: {url}")
-            logger.error("   This should not happen in production mode!")
-            raise Exception(f"Failed to extract real data from {url}. Check Browserbase API configuration and network connectivity.")
+            # Return a fallback result instead of raising exception
+            extraction_data = {
+                "extraction_id": str(uuid.uuid4()),
+                "url": url,
+                "title": f"Extraction Failed: {url}",
+                "content": f"Failed to extract content from {url}",
+                "structured_data": {},
+                "screenshot_path": None,
+                "extraction_method": "failed",
+                "timestamp": time.time(),
+                "raw_data": real_data or {"error": "Extraction failed"}
+            }
             
-        # Store in local database for backup/reference
-        await self._store_extraction(extraction_data)
+        # Note: Storage is handled by PostgreSQL Database Agent via MCP hub
+        # No local storage needed - everything goes through the database agent
         
-        return extraction_data
+        # Return in format expected by workflow
+        if real_data and real_data.get('success'):
+            return {
+                "status": "success",
+                "data": extraction_data,
+                "title": extraction_data["title"],
+                "content": extraction_data["content"],
+                "extraction_id": extraction_data["extraction_id"]
+            }
+        else:
+            return {
+                "status": "failed",
+                "data": extraction_data,
+                "title": extraction_data["title"],
+                "content": extraction_data["content"],
+                "error": "Real data extraction failed",
+                "extraction_id": extraction_data["extraction_id"]
+            }
 
-    async def _store_extraction(self, extraction_data):
-        """Store extraction data in local SQLite database for backup/reference"""
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute("""
-                    INSERT INTO web_extractions (url, title, content, extracted_data, extraction_type, screenshot_path, metadata)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    extraction_data.get("url", ""),
-                    extraction_data.get("title", ""),
-                    extraction_data.get("content", ""),
-                    json.dumps(extraction_data.get("structured_data", {})),
-                    "general",  # extraction_type
-                    extraction_data.get("screenshot_path"),
-                    json.dumps({"extraction_method": extraction_data.get("extraction_method", "unknown")})
-                ))
-                conn.commit()
-                logger.info(f"📝 Stored extraction backup in local database")
-        except Exception as e:
-            logger.warning(f"Failed to store extraction backup: {e}")
-            
-    async def _capture_screenshot(self, url, extraction_id):
-        """Capture screenshot (legacy method - screenshots now handled by Browserbase API)"""
-        logger.info("Screenshot capture handled by Browserbase API")
-        return None
+    def _resolve_extraction_type(self, url: str, requested_type: str = "general") -> str:
+        """
+        Resolve the best extraction type for a URL based on configuration.
         
+        Args:
+            url: Target URL
+            requested_type: Explicitly requested extraction type
+            
+        Returns:
+            str: Resolved extraction type
+        """
+        try:
+            # Parse domain from URL
+            parsed_url = urlparse(url)
+            domain = parsed_url.netloc.lower()
+            
+            # Check if requested type is an alias and resolve to primary type
+            if requested_type != "general":
+                for type_name, type_config in self.extraction_config.extraction_types.items():
+                    if requested_type == type_name:
+                        return type_name
+                    elif requested_type in (type_config.aliases or []):
+                        logger.info(f"🔄 Resolved alias '{requested_type}' to primary type '{type_name}'")
+                        return type_name
+            
+            # If not a recognized type/alias, check if domain has specific config
+            domain_type = get_extraction_type_for_domain(domain, self.extraction_config)
+            if domain_type != "general" and requested_type == "general":
+                logger.info(f"🎯 Auto-detected extraction type '{domain_type}' for domain '{domain}'")
+                return domain_type
+            
+            # Return requested type (could be custom or general)
+            return requested_type
+            
+        except Exception as e:
+            logger.warning(f"Failed to resolve extraction type: {e}, using '{requested_type}'")
+            return requested_type
     
+    def _get_extraction_settings(self, extraction_type: str) -> dict:
+        """
+        Get extraction settings for a specific type.
+        
+        Args:
+            extraction_type: The extraction type
+            
+        Returns:
+            dict: Extraction settings
+        """
+        try:
+            # Start with default settings
+            settings = self.extraction_config.default_extraction.copy()
+            
+            # Add type-specific settings
+            if extraction_type in self.extraction_config.extraction_types:
+                type_config = self.extraction_config.extraction_types[extraction_type]
+                if type_config.wait_time:
+                    settings["wait_for_content"] = type_config.wait_time
+            
+            # Add general extraction settings
+            if "extraction_settings" in self.extraction_config.extraction_settings:
+                settings.update(self.extraction_config.extraction_settings)
+            
+            return settings
+            
+        except Exception as e:
+            logger.warning(f"Failed to get extraction settings: {e}")
+            return self.extraction_config.default_extraction
+
     async def _capture_screenshot(self, url, extraction_id=None):
         """Capture real screenshot of a webpage using Playwright"""
         try:
@@ -228,12 +333,19 @@ class SimpleBrowserbaseAgent:
             logging.error(f"Error capturing screenshot for {url}: {e}")
             return None
     
-    async def _extract_real_data(self, url):
-        """Extract real data from webpage using Browserbase API"""
+    async def _extract_real_data(self, url, extraction_type="general", extraction_settings=None):
+        """Extract real data from webpage using Browserbase API or Playwright fallback"""
+        if extraction_settings is None:
+            extraction_settings = self._get_extraction_settings(extraction_type)
         try:
+            # Check if Browserbase is disabled via configuration
+            if not BROWSERBASE_ENABLED:
+                logger.info("🎛️ Browserbase disabled in configuration, using Playwright-only mode")
+                return await self._extract_with_playwright(url, extraction_type, extraction_settings)
+                
             if not BROWSERBASE_API_KEY or not BROWSERBASE_PROJECT_ID:
                 logger.warning("Browserbase API credentials not configured, falling back to local Playwright")
-                return await self._extract_with_playwright(url)
+                return await self._extract_with_playwright(url, extraction_type, extraction_settings)
             
             logger.info(f"🌍 Extracting real data from {url} using Browserbase API...")
             
@@ -242,7 +354,7 @@ class SimpleBrowserbaseAgent:
             if not session_data:
                 logger.error("❌ Failed to create Browserbase session")
                 logger.info("🔧 Falling back to local Playwright extraction...")
-                return await self._extract_with_playwright(url)
+                return await self._extract_with_playwright(url, extraction_type, extraction_settings)
             
             session_id = session_data.get('id')
             logger.info(f"✅ Created Browserbase session: {session_id}")
@@ -258,7 +370,7 @@ class SimpleBrowserbaseAgent:
         except Exception as e:
             logger.error(f"❌ Browserbase extraction failed: {e}")
             logger.info("🔧 Falling back to local Playwright extraction...")
-            return await self._extract_with_playwright(url)
+            return await self._extract_with_playwright(url, extraction_type, extraction_settings)
     
     async def _create_browserbase_session(self):
         """Create a new Browserbase session"""
@@ -413,16 +525,44 @@ class SimpleBrowserbaseAgent:
         except Exception as e:
             logger.error(f"Error terminating Browserbase session: {e}")
     
-    async def _extract_with_playwright(self, url):
-        """Fallback extraction using local Playwright"""
+    async def _extract_with_playwright(self, url, extraction_type="general", extraction_settings=None):
+        """Enhanced extraction using local Playwright with configurable extraction types"""
+        if extraction_settings is None:
+            extraction_settings = self._get_extraction_settings(extraction_type)
+        
         try:
             async with async_playwright() as p:
                 browser = await p.chromium.launch(headless=True)
                 page = await browser.new_page()
                 
-                # Navigate to URL
-                await page.goto(url, wait_until='domcontentloaded', timeout=30000)
-                await page.wait_for_timeout(2000)
+                # Use timeout from settings
+                timeout = extraction_settings.get("timeout", 30000)
+                
+                # Navigate to URL with configurable timeout
+                try:
+                    logger.info(f"📡 Navigating to: {url}")
+                    await page.goto(url, wait_until='domcontentloaded', timeout=timeout)
+                    logger.info(f"✅ Page loaded successfully: {url}")
+                except Exception as e:
+                    logger.warning(f"Initial navigation failed, trying with basic timeout: {e}")
+                    await page.goto(url, timeout=timeout//2)  # Fallback with reduced timeout
+                
+                # Use wait time from settings with domain-specific adjustments
+                base_wait_time = extraction_settings.get("wait_for_content", 4000)
+                
+                if 'finance.yahoo.com' in url:
+                    wait_time = max(base_wait_time, 8000)  # Yahoo Finance needs more time
+                    logger.info("⏳ Waiting for Yahoo Finance content to load...")
+                elif 'marketbeat.com' in url:
+                    wait_time = max(base_wait_time, 6000)  # MarketBeat also needs time
+                    logger.info("⏳ Waiting for MarketBeat content to load...")
+                elif 'news.ycombinator.com' in url:
+                    wait_time = max(base_wait_time, 3000)  # HN loads faster
+                    logger.info("⏳ Waiting for Hacker News content to load...")
+                else:
+                    wait_time = base_wait_time
+                
+                await page.wait_for_timeout(wait_time)
 
                 # Capture screenshot first
                 screenshot_path = None
@@ -445,40 +585,45 @@ class SimpleBrowserbaseAgent:
                 # Extract basic page info
                 title = await page.title()
                 
-                # Extract text content
-                content = await page.evaluate('''
-                    () => {
-                        // Remove script and style elements
-                        const scripts = document.querySelectorAll('script, style');
-                        scripts.forEach(el => el.remove());
-                        
-                        // Get main content
-                        const body = document.body;
-                        return body ? body.innerText.substring(0, 1000) : '';
-                    }
-                ''')
+                # Enhanced content extraction based on configuration
+                logger.info(f"🔍 Extracting content using '{extraction_type}' extraction type for: {url}")
                 
-                # Extract links
-                links = await page.evaluate('''
-                    () => {
-                        const links = Array.from(document.querySelectorAll('a[href]'));
-                        return links.slice(0, 10).map(link => link.href);
-                    }
-                ''')
+                # Check if extraction type is comprehensive or has comprehensive aliases
+                comprehensive_aliases = get_extraction_aliases("comprehensive", self.extraction_config)
+                if extraction_type.lower() in [alias.lower() for alias in comprehensive_aliases]:
+                    logger.info("🔥 Using COMPREHENSIVE extraction mode - extracting ALL data regardless of domain")
+                    extraction_result = await self._extract_generic_content(page, url)
+                elif extraction_type == 'financial' or 'finance.yahoo.com' in url:
+                    extraction_result = await self._extract_yahoo_finance_content(page, url)
+                elif extraction_type == 'competitor_analysis' or 'marketbeat.com' in url:
+                    extraction_result = await self._extract_marketbeat_content(page, url)
+                elif extraction_type == 'github' or 'github.com' in url:
+                    extraction_result = await self._extract_github_content(page, url)
+                elif extraction_type == 'news' or 'news.ycombinator.com' in url:
+                    extraction_result = await self._extract_hackernews_content(page, url)
+                else:
+                    extraction_result = await self._extract_generic_content(page, url)
                 
                 await browser.close()
 
-                # Return in expected format
+                # Combine results
+                content = extraction_result.get('content', '')
+                structured_data = extraction_result.get('structured_data', {})
+                links = extraction_result.get('links', [])
+
+                # Return in expected format with enhanced metadata
                 return {
                     'success': True,
                     'title': title,
-                    'content': content.strip(),
+                    'content': content,
                     'links': links,
                     'screenshot_path': str(screenshot_path) if screenshot_path else None,
-                    'extraction_method': 'local_playwright',
+                    'extraction_method': 'local_playwright_enhanced',
                     'metadata': {
-                        'content_length': len(content.strip()),
-                        'links_count': len(links)
+                        'content_length': len(content),
+                        'links_count': len(links),
+                        'structured_data': structured_data,
+                        'extraction_type': extraction_result.get('type', 'general')
                     },
                     'timestamp': time.time()
                 }
@@ -486,6 +631,364 @@ class SimpleBrowserbaseAgent:
         except Exception as e:
             logger.warning(f"Real data extraction failed for {url}: {e}")
             return {'success': False, 'error': str(e)}
+    
+    async def _extract_yahoo_finance_content(self, page, url):
+        """Extract Yahoo Finance specific content"""
+        try:
+            # Wait for content to load
+            await page.wait_for_timeout(2000)
+            
+            content_data = await page.evaluate('''
+                () => {
+                    const data = {
+                        content: '',
+                        structured_data: {
+                            stock_data: {},
+                            debug_info: {}
+                        },
+                        links: [],
+                        type: 'financial'
+                    };
+                    
+                    // Debug: Check what elements are available
+                    data.structured_data.debug_info.total_elements = document.querySelectorAll('*').length;
+                    data.structured_data.debug_info.has_tables = document.querySelectorAll('table').length;
+                    data.structured_data.debug_info.has_spans = document.querySelectorAll('span').length;
+                    
+                    // Get all text content first
+                    const bodyText = document.body.innerText || document.body.textContent || '';
+                    data.structured_data.debug_info.body_length = bodyText.length;
+                    
+                    // Look for any price-like patterns in text
+                    const pricePattern = /\\$?\\d+\\.\\d{2}/g;
+                    const prices = bodyText.match(pricePattern) || [];
+                    data.structured_data.stock_data.found_prices = prices.slice(0, 5);
+                    
+                    // Look for percentage changes
+                    const changePattern = /[+-]?\\d+\\.\\d{1,2}%/g;
+                    const changes = bodyText.match(changePattern) || [];
+                    data.structured_data.stock_data.found_changes = changes.slice(0, 5);
+                    
+                    // Extract meaningful content from body
+                    const lines = bodyText.split('\\n').filter(line => {
+                        const clean = line.trim();
+                        return clean.length > 10 && 
+                               clean.length < 200 &&
+                               !clean.toLowerCase().includes('cookie') &&
+                               !clean.toLowerCase().includes('privacy') &&
+                               (clean.includes('$') || clean.includes('%') || 
+                                clean.toLowerCase().includes('stock') ||
+                                clean.toLowerCase().includes('price') ||
+                                clean.toLowerCase().includes('market') ||
+                                /\\d/.test(clean));
+                    });
+                    
+                    data.content = lines.slice(0, 20).join('\\n');
+                    
+                    // If no meaningful content found, get first 1000 chars
+                    if (data.content.length < 50) {
+                        data.content = bodyText.substring(0, 1000);
+                    }
+                    
+                    // Extract financial-related links
+                    const links = Array.from(document.querySelectorAll('a[href]'));
+                    data.links = links.slice(0, 10).map(link => ({
+                        href: link.href,
+                        text: (link.innerText || link.textContent || '').trim()
+                    })).filter(link => link.text.length > 0 && link.text.length < 50);
+                    
+                    return data;
+                }
+            ''')
+            
+            logger.info(f"Yahoo Finance extraction result: content_length={len(content_data.get('content', ''))}, debug_info={content_data.get('structured_data', {}).get('debug_info', {})}")
+            
+            return content_data
+            
+        except Exception as e:
+            logger.error(f"Yahoo Finance extraction failed: {e}")
+            return await self._extract_generic_content(page, url)
+    
+    async def _extract_github_content(self, page, url):
+        """Extract GitHub specific content"""
+        try:
+            content_data = await page.evaluate('''
+                () => {
+                    const data = {
+                        content: '',
+                        structured_data: {
+                            repositories: [],
+                            languages: [],
+                            stats: {}
+                        },
+                        links: [],
+                        type: 'github'
+                    };
+                    
+                    // Extract repository information
+                    const repoElements = document.querySelectorAll('[data-testid*="repo"], [itemprop="name"], .repo');
+                    data.structured_data.repositories = Array.from(repoElements).slice(0, 10).map(el => el.innerText.trim());
+                    
+                    // Extract languages
+                    const langElements = document.querySelectorAll('[data-testid*="lang"], .language, [aria-label*="language"]');
+                    data.structured_data.languages = Array.from(langElements).slice(0, 10).map(el => el.innerText.trim());
+                    
+                    // Extract user stats
+                    const statElements = document.querySelectorAll('.Counter, [data-testid*="stat"]');
+                    statElements.forEach(el => {
+                        const text = el.innerText.trim();
+                        const parent = el.parentElement;
+                        if (parent) {
+                            const label = parent.innerText.toLowerCase();
+                            if (label.includes('repo')) data.structured_data.stats.public_repos = text;
+                            if (label.includes('follow')) data.structured_data.stats.followers = text;
+                        }
+                    });
+                    
+                    // Clean content
+                    const mainContent = document.querySelector('main, [role="main"], .application-main') || document.body;
+                    data.content = mainContent.innerText.substring(0, 2000);
+                    
+                    return data;
+                }
+            ''')
+            
+            return content_data
+            
+        except Exception as e:
+            logger.error(f"GitHub extraction failed: {e}")
+            return await self._extract_generic_content(page, url)
+    
+    async def _extract_hackernews_content(self, page, url):
+        """Extract Hacker News specific content"""
+        try:
+            content_data = await page.evaluate('''
+                () => {
+                    const data = {
+                        content: '',
+                        structured_data: {
+                            top_stories: []
+                        },
+                        links: [],
+                        type: 'news'
+                    };
+                    
+                    // Extract story titles and metadata
+                    const storyElements = document.querySelectorAll('.titleline, .storylink, .athing');
+                    data.structured_data.top_stories = Array.from(storyElements).slice(0, 15).map((el, index) => {
+                        const titleEl = el.querySelector('a, .storylink') || el;
+                        const scoreEl = document.querySelector(`[id="${el.id}"] + tr .score`) || 
+                                      document.querySelector(`#score_${el.id}`);
+                        
+                        return {
+                            title: titleEl.innerText.trim(),
+                            url: titleEl.href || '',
+                            points: scoreEl ? scoreEl.innerText : '0 points',
+                            position: index + 1
+                        };
+                    }).filter(story => story.title.length > 0);
+                    
+                    // Clean content
+                    data.content = document.body.innerText.substring(0, 2000);
+                    
+                    return data;
+                }
+            ''')
+            
+            return content_data
+            
+        except Exception as e:
+            logger.error(f"Hacker News extraction failed: {e}")
+            return await self._extract_generic_content(page, url)
+    
+    async def _extract_marketbeat_content(self, page, url):
+        """Extract MarketBeat specific content for competitor analysis"""
+        try:
+            logger.info(f"🏢 Extracting MarketBeat competitor data from: {url}")
+            
+            content_data = await page.evaluate('''
+                () => {
+                    const data = {
+                        content: '',
+                        structured_data: {
+                            competitors: [],
+                            stock_data: {},
+                            financial_metrics: {}
+                        },
+                        links: [],
+                        type: 'competitor_analysis'
+                    };
+                    
+                    // Extract competitor information from tables
+                    const tables = document.querySelectorAll('table, .table, [class*="competitor"]');
+                    const competitors = [];
+                    
+                    tables.forEach(table => {
+                        const rows = table.querySelectorAll('tr');
+                        rows.forEach(row => {
+                            const cells = row.querySelectorAll('td, th');
+                            if (cells.length >= 2) {
+                                const companyCell = cells[0];
+                                const company = companyCell.innerText.trim();
+                                
+                                // Look for stock symbols and company names
+                                if (company.length > 2 && company.length < 50 && 
+                                    (company.includes('(') || /[A-Z]{2,5}/.test(company))) {
+                                    competitors.push({
+                                        name: company,
+                                        data: Array.from(cells).slice(1).map(cell => cell.innerText.trim())
+                                    });
+                                }
+                            }
+                        });
+                    });
+                    
+                    data.structured_data.competitors = competitors.slice(0, 10);
+                    
+                    // Extract financial data patterns
+                    const bodyText = document.body.innerText || '';
+                    const pricePattern = /\\$?[\\d,]+\\.?\\d{0,2}/g;
+                    const percentPattern = /[+-]?\\d+\\.?\\d{0,2}%/g;
+                    
+                    const prices = bodyText.match(pricePattern) || [];
+                    const percentages = bodyText.match(percentPattern) || [];
+                    
+                    data.structured_data.stock_data = {
+                        found_prices: prices.slice(0, 8),
+                        found_percentages: percentages.slice(0, 8)
+                    };
+                    
+                    // Extract meaningful content
+                    const lines = bodyText.split('\\n').filter(line => {
+                        const clean = line.trim();
+                        return clean.length > 10 && clean.length < 200 &&
+                               (clean.includes('$') || clean.includes('%') || 
+                                clean.toLowerCase().includes('competitor') ||
+                                clean.toLowerCase().includes('stock') ||
+                                clean.toLowerCase().includes('market') ||
+                                /\\d/.test(clean));
+                    });
+                    
+                    data.content = lines.slice(0, 25).join('\\n');
+                    
+                    // Extract relevant links
+                    const links = Array.from(document.querySelectorAll('a[href*="stock"], a[href*="quote"]'));
+                    data.links = links.slice(0, 10).map(link => ({
+                        href: link.href,
+                        text: (link.innerText || link.textContent || '').trim()
+                    })).filter(link => link.text.length > 0 && link.text.length < 60);
+                    
+                    return data;
+                }
+            ''')
+            
+            logger.info(f"MarketBeat extraction result: content_length={len(content_data.get('content', ''))}, competitors={len(content_data.get('structured_data', {}).get('competitors', []))}")
+            
+            return content_data
+            
+        except Exception as e:
+            logger.error(f"MarketBeat extraction failed: {e}")
+            return await self._extract_generic_content(page, url)
+    
+    async def _extract_generic_content(self, page, url):
+        """Enhanced generic content extraction for comprehensive data collection"""
+        try:
+            content_data = await page.evaluate('''
+                () => {
+                    // Remove script and style elements for cleaner content
+                    const scripts = document.querySelectorAll('script, style');
+                    scripts.forEach(el => el.remove());
+                    
+                    // Get ALL content (no character limit)
+                    const body = document.body;
+                    const fullContent = body ? body.innerText : '';
+                    
+                    // Extract ALL links (no limit)
+                    const links = Array.from(document.querySelectorAll('a[href]'));
+                    const linkData = links.map(link => ({
+                        href: link.href,
+                        text: link.innerText.trim(),
+                        title: link.title || ''
+                    })).filter(link => link.text.length > 0);
+                    
+                    // Extract images
+                    const images = Array.from(document.querySelectorAll('img[src]'));
+                    const imageData = images.map(img => ({
+                        src: img.src,
+                        alt: img.alt || '',
+                        title: img.title || ''
+                    }));
+                    
+                    // Extract headings for structure
+                    const headings = Array.from(document.querySelectorAll('h1, h2, h3, h4, h5, h6'));
+                    const headingData = headings.map(h => ({
+                        level: h.tagName.toLowerCase(),
+                        text: h.innerText.trim()
+                    }));
+                    
+                    // Extract forms for interactivity
+                    const forms = Array.from(document.querySelectorAll('form'));
+                    const formData = forms.map(form => ({
+                        action: form.action || '',
+                        method: form.method || 'get',
+                        inputs: Array.from(form.querySelectorAll('input, select, textarea')).map(input => ({
+                            type: input.type || input.tagName.toLowerCase(),
+                            name: input.name || '',
+                            placeholder: input.placeholder || ''
+                        }))
+                    }));
+                    
+                    // Extract tables for structured data
+                    const tables = Array.from(document.querySelectorAll('table'));
+                    const tableData = tables.map(table => {
+                        const headers = Array.from(table.querySelectorAll('th')).map(th => th.innerText.trim());
+                        const rows = Array.from(table.querySelectorAll('tr')).map(tr => 
+                            Array.from(tr.querySelectorAll('td')).map(td => td.innerText.trim())
+                        ).filter(row => row.length > 0);
+                        return { headers, rows };
+                    });
+                    
+                    // Extract meta tags
+                    const metaTags = Array.from(document.querySelectorAll('meta'));
+                    const metaData = {};
+                    metaTags.forEach(meta => {
+                        if (meta.name) metaData[meta.name] = meta.content;
+                        if (meta.property) metaData[meta.property] = meta.content;
+                    });
+                    
+                    return {
+                        content: fullContent.trim(),
+                        structured_data: {
+                            headings: headingData,
+                            images: imageData,
+                            forms: formData,
+                            tables: tableData,
+                            meta_tags: metaData,
+                            content_stats: {
+                                total_characters: fullContent.length,
+                                total_links: linkData.length,
+                                total_images: imageData.length,
+                                total_headings: headingData.length,
+                                total_forms: formData.length,
+                                total_tables: tableData.length
+                            }
+                        },
+                        links: linkData,
+                        type: 'comprehensive_general'
+                    };
+                }
+            ''')
+            
+            return content_data
+            
+        except Exception as e:
+            logger.error(f"Generic extraction failed: {e}")
+            return {
+                'content': 'Extraction failed',
+                'structured_data': {},
+                'links': [],
+                'type': 'error'
+            }
     
     async def _create_mock_screenshot(self, screenshot_path, url):
         """Create a mock screenshot for demonstration purposes"""
@@ -564,10 +1067,6 @@ class SimpleBrowserbaseAgent:
     async def cleanup(self):
         """Cleanup resources"""
         logger.info("Browserbase agent cleanup complete")
-from aiohttp import web
-import aiohttp_cors
-import json
-import uuid
 
 # Setup logging
 logging.basicConfig(
@@ -575,6 +1074,38 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 )
 logger = logging.getLogger(__name__)
+
+# Load config utilities after logger is available
+try:
+    from src.utils.config import (
+        load_extraction_config, 
+        get_extraction_type_for_domain, 
+        get_extraction_aliases,
+        ExtractionConfig
+    )
+    CONFIG_AVAILABLE = True
+    logger.info("✅ Extraction configuration utilities loaded")
+except ImportError as e:
+    logger.warning(f"⚠️  Could not load config utilities: {e}, using fallbacks")
+    CONFIG_AVAILABLE = False
+    # Fallback config classes
+    class ExtractionConfig:
+        def __init__(self):
+            self.default_extraction = {"type": "general", "take_screenshot": True, "timeout": 30000, "wait_for_content": 4000}
+            self.extraction_types = {}
+            self.domain_configs = {}
+            self.extraction_settings = {}
+    
+    def load_extraction_config(): 
+        return ExtractionConfig()
+    
+    def get_extraction_type_for_domain(domain, config):
+        return "general"
+        
+    def get_extraction_aliases(extraction_type, config):
+        if extraction_type == "comprehensive":
+            return ["comprehensive", "full", "complete", "all"]
+        return [extraction_type]
 
 class BrowserbaseAgentServer:
     """Browserbase agent MCP server"""
@@ -718,60 +1249,72 @@ class BrowserbaseAgentServer:
                         selectors=tool_args.get("selectors"),
                         take_screenshot=tool_args.get("take_screenshot", True)
                     )
-                    # Ensure proper response format
+                    
+                    # Get structured data from the correct location in agent response
+                    agent_data = extraction_result.get("data", {})
+                    structured_data = agent_data.get("structured_data", {})
+                    
+                    # If no structured data in agent_data, try to get it from raw_data metadata
+                    if not structured_data:
+                        raw_data = agent_data.get("raw_data", {})
+                        if raw_data and raw_data.get("metadata"):
+                            structured_data = raw_data.get("metadata", {}).get("structured_data", {})
+                    
                     result = {
-                        "status": "success",
-                        "data": extraction_result.get("structured_data", {}),
+                        "status": extraction_result.get("status", "unknown"),
+                        "data": structured_data,
                         "title": extraction_result.get("title", ""),
                         "content": extraction_result.get("content", ""),
-                        "links": extraction_result.get("structured_data", {}).get("links", []),
-                        "url": extraction_result.get("url", tool_args.get("url")),
-                        "extraction_type": extraction_result.get("extraction_type", "general")
+                        "links": agent_data.get("raw_data", {}).get("links", []),
+                        "url": tool_args.get("url"),
+                        "extraction_type": agent_data.get("raw_data", {}).get("metadata", {}).get("extraction_type", "general"),
+                        "extraction_method": agent_data.get("extraction_method", "unknown"),
+                        "screenshot_path": agent_data.get("screenshot_path"),
+                        "metadata": agent_data.get("raw_data", {}).get("metadata", {})
                     }
                 else:
                     return self.error_response(f"Unknown tool: {tool_name}", -32601, request_id)
                     
             elif method == "extract_website_data":
-                extraction_result = await self.agent.extract_website_data(
-                    url=params.get("url"),
-                    extraction_type=params.get("extraction_type", "general"),
-                    selectors=params.get("selectors"),
-                    take_screenshot=params.get("take_screenshot", True)
-                )
-                # Ensure proper response format
-                result = {
-                    "status": "success",
-                    "data": extraction_result.get("structured_data", {}),
-                    "title": extraction_result.get("title", ""),
-                    "content": extraction_result.get("content", ""),
-                    "links": extraction_result.get("structured_data", {}).get("links", []),
-                    "url": extraction_result.get("url", params.get("url")),
-                    "extraction_type": extraction_result.get("extraction_type", "general")
-                }
-            elif method == "extract_stock_data":
-                # Mock stock data extraction
-                result = {
-                    "url": params.get("url", "https://finance.yahoo.com/sectors/technology/semiconductors/"),
-                    "stock_data": {
-                        "semiconductor_stocks": [
-                            {
-                                "symbol": "NVDA",
-                                "name": "NVIDIA Corporation", 
-                                "price": "$875.50",
-                                "change": "+12.45",
-                                "change_percent": "+1.44%"
-                            },
-                            {
-                                "symbol": "AMD",
-                                "name": "Advanced Micro Devices",
-                                "price": "$145.75", 
-                                "change": "-2.30",
-                                "change_percent": "-1.55%"
-                            }
-                        ]
-                    },
-                    "timestamp": datetime.now().isoformat()
-                }
+                try:
+                    extraction_result = await self.agent.extract_website_data(
+                        url=params.get("url"),
+                        extraction_type=params.get("extraction_type", "general"),
+                        selectors=params.get("selectors"),
+                        take_screenshot=params.get("take_screenshot", True)
+                    )
+                    
+                    # Check if extraction was successful
+                    if extraction_result and extraction_result.get("status") == "success":
+                        # Get structured data from the correct location in agent response
+                        agent_data = extraction_result.get("data", {})
+                        structured_data = agent_data.get("structured_data", {})
+                        
+                        # If no structured data in agent_data, try to get it from raw_data metadata
+                        if not structured_data:
+                            raw_data = agent_data.get("raw_data", {})
+                            if raw_data and raw_data.get("metadata"):
+                                structured_data = raw_data.get("metadata", {}).get("structured_data", {})
+                        
+                        result = {
+                            "status": "success",
+                            "data": structured_data,
+                            "title": extraction_result.get("title", ""),
+                            "content": extraction_result.get("content", ""),
+                            "links": agent_data.get("raw_data", {}).get("links", []),
+                            "url": params.get("url"),
+                            "extraction_type": agent_data.get("raw_data", {}).get("metadata", {}).get("extraction_type", "general"),
+                            "extraction_method": agent_data.get("extraction_method", "unknown"),
+                            "screenshot_path": agent_data.get("screenshot_path"),
+                            "metadata": agent_data.get("raw_data", {}).get("metadata", {})
+                        }
+                    else:
+                        # Return error response if extraction failed
+                        return self.error_response("Web extraction failed", -1, request_id)
+                        
+                except Exception as e:
+                    logger.error(f"Extract website data error: {e}")
+                    return self.error_response(f"Extraction error: {str(e)}", -1, request_id)
             elif method == "process_query":
                 result = await self.agent.process_query(params.get("query", ""))
             elif method == "query_extractions":
@@ -780,12 +1323,6 @@ class BrowserbaseAgentServer:
                     extraction_type=params.get("extraction_type"),
                     limit=params.get("limit", 10)
                 )
-            elif method == "take_screenshot":
-                result = {
-                    "url": params.get("url"),
-                    "screenshot_path": f"data/screenshots/mock_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
-                    "message": "Mock screenshot taken"
-                }
             else:
                 return self.error_response(f"Unknown method: {method}", -32601, request_id)
             
@@ -823,7 +1360,7 @@ class BrowserbaseAgentServer:
             status.update({
                 "session_id": getattr(self.agent, 'session_id', None),
                 "tools_count": len(getattr(self.agent, 'tools', [])),
-                "extraction_mode": "mock" if not self.agent.mcp_client else "real"
+                "extraction_mode": "real" if hasattr(self.agent, 'llm_client') else "unknown"
             })
         
         return web.json_response(status)

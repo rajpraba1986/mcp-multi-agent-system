@@ -25,7 +25,7 @@ class DatabaseConfig(BaseModel):
     database: str = "toolbox_demo"
     user: str = "demo_user"
     password: str = "demo_password"
-    schema: str = "public"
+    db_schema: str = "public"  # Renamed to avoid shadow warning
     ssl_mode: Optional[str] = None
 
 
@@ -47,6 +47,38 @@ class LLMConfig(BaseModel):
     api_key: Optional[str] = None
 
 
+class ExtractionTypeConfig(BaseModel):
+    """Single extraction type configuration."""
+    description: str
+    aliases: Optional[list] = []
+    domains: list = ["*"]
+    features: list = []
+    use_cases: list = []
+    wait_time: Optional[int] = None
+    patterns: Optional[list] = []
+
+
+class DomainConfig(BaseModel):
+    """Domain-specific configuration."""
+    extraction_type: str
+    wait_time: Optional[int] = None
+    scroll_to_load: bool = False
+    selectors: Optional[Dict[str, str]] = {}
+
+
+class ExtractionConfig(BaseModel):
+    """Web extraction configuration."""
+    default_extraction: Dict[str, Any] = {
+        "type": "general",
+        "take_screenshot": True,
+        "timeout": 30000,
+        "wait_for_content": 4000
+    }
+    extraction_types: Dict[str, ExtractionTypeConfig] = {}
+    domain_configs: Dict[str, DomainConfig] = {}
+    extraction_settings: Dict[str, Any] = {}
+
+
 class AppConfig(BaseSettings):
     """Main application configuration."""
     
@@ -62,6 +94,9 @@ class AppConfig(BaseSettings):
     
     # LLM configuration
     llm: LLMConfig = Field(default_factory=LLMConfig)
+    
+    # Extraction configuration
+    extraction: ExtractionConfig = Field(default_factory=ExtractionConfig)
     
     # Logging
     log_level: str = Field(default="INFO", env="LOG_LEVEL")
@@ -302,6 +337,98 @@ def load_config(
                 break
     
     return ConfigManager(config_file, environment)
+
+
+def load_extraction_config(config_file: str = "config/extraction_config.yaml") -> ExtractionConfig:
+    """
+    Load web extraction configuration from YAML file.
+    
+    Args:
+        config_file: Path to extraction configuration file
+        
+    Returns:
+        ExtractionConfig: Loaded extraction configuration
+    """
+    try:
+        config_path = Path(config_file)
+        if not config_path.exists():
+            logger.warning(f"Extraction config file not found: {config_file}, using defaults")
+            return ExtractionConfig()
+            
+        with open(config_path, 'r') as file:
+            config_data = yaml.safe_load(file)
+            
+        # Parse extraction types
+        extraction_types = {}
+        for name, type_config in config_data.get("extraction_types", {}).items():
+            extraction_types[name] = ExtractionTypeConfig(**type_config)
+        
+        # Parse domain configs
+        domain_configs = {}
+        for domain, domain_config in config_data.get("domain_configs", {}).items():
+            domain_configs[domain] = DomainConfig(**domain_config)
+        
+        # Create extraction config
+        extraction_config = ExtractionConfig(
+            default_extraction=config_data.get("default_extraction", {}),
+            extraction_types=extraction_types,
+            domain_configs=domain_configs,
+            extraction_settings=config_data.get("extraction_settings", {})
+        )
+        
+        logger.info(f"Loaded extraction config with {len(extraction_types)} extraction types")
+        return extraction_config
+        
+    except Exception as e:
+        logger.error(f"Error loading extraction config: {e}")
+        return ExtractionConfig()
+
+
+def get_extraction_type_for_domain(domain: str, extraction_config: ExtractionConfig) -> str:
+    """
+    Get the appropriate extraction type for a domain.
+    
+    Args:
+        domain: Domain name (e.g., "finance.yahoo.com")
+        extraction_config: Extraction configuration
+        
+    Returns:
+        str: Recommended extraction type
+    """
+    # Check for exact domain match
+    if domain in extraction_config.domain_configs:
+        return extraction_config.domain_configs[domain].extraction_type
+    
+    # Check for partial domain matches
+    for config_domain, config in extraction_config.domain_configs.items():
+        if config_domain in domain or domain in config_domain:
+            return config.extraction_type
+    
+    # Return default
+    return extraction_config.default_extraction.get("type", "general")
+
+
+def get_extraction_aliases(extraction_type: str, extraction_config: ExtractionConfig) -> list:
+    """
+    Get all aliases for an extraction type.
+    
+    Args:
+        extraction_type: Primary extraction type name
+        extraction_config: Extraction configuration
+        
+    Returns:
+        list: List of aliases including the primary name
+    """
+    if extraction_type in extraction_config.extraction_types:
+        aliases = extraction_config.extraction_types[extraction_type].aliases or []
+        return [extraction_type] + aliases
+    
+    # Check if the provided type is an alias
+    for type_name, type_config in extraction_config.extraction_types.items():
+        if extraction_type in (type_config.aliases or []):
+            return [type_name] + type_config.aliases
+    
+    return [extraction_type]
 
 
 def create_default_config_file(file_path: str = "config/app.yaml"):

@@ -286,13 +286,19 @@ class HubBasedWorkflowOrchestrator:
         successful_extractions = 0
         failed_extractions = 0
         
-        # Process each URL using hub-mediated communication
-        for url_config in active_urls:
+        # Process each URL using hub-mediated communication with rate limiting
+        for i, url_config in enumerate(active_urls):
             url = url_config['url']
             name = url_config['name']
             extraction_type = url_config.get('extraction_type', 'general')
             
-            print(f"\n🌐 Processing: {name}")
+            # Rate limiting: Add delay between requests to avoid API rate limits
+            if i > 0:
+                delay_seconds = 3  # 3 second delay between extractions
+                print(f"⏳ Rate limiting: Waiting {delay_seconds} seconds before next extraction...")
+                await asyncio.sleep(delay_seconds)
+            
+            print(f"\n🌐 Processing: {name} ({i+1}/{len(active_urls)})")
             print(f"   URL: {url}")
             
             try:
@@ -300,12 +306,23 @@ class HubBasedWorkflowOrchestrator:
                 browserbase_agent = agents["browserbase"]
                 print(f"   📡 Calling browserbase agent via hub...")
                 
+                # Set appropriate wait times based on domain
+                wait_time = 3  # default
+                if "finance.yahoo.com" in url:
+                    wait_time = 8
+                elif "marketbeat.com" in url:
+                    wait_time = 6
+                elif "news.ycombinator.com" in url:
+                    wait_time = 3
+                    
                 extraction_response = await self.hub_client.call_agent_via_hub(
                     browserbase_agent["agent_id"],
                     "extract_website_data",
                     {
                         "url": url,
-                        "extraction_type": extraction_type
+                        "extraction_type": extraction_type,
+                        "wait_time": wait_time,
+                        "extract_links": True
                     }
                 )
                 
